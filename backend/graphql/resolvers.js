@@ -49,7 +49,16 @@ module.exports = {
       "creator",
       "name email pic"
     );
-    return { posts: posts };
+    return {
+      posts: posts.map((p) => {
+        return {
+          ...p._doc,
+          _id: p._id.toString(),
+          createdAt: p.createdAt.toISOString(),
+          updatedAt: p.updatedAt.toISOString(),
+        };
+      }),
+    };
   },
   fetchMyPosts: async function (args, req) {
     const userId = req.userId;
@@ -57,12 +66,22 @@ module.exports = {
       "creator",
       "name email pic"
     );
-    return { posts: posts };
+    return {
+      posts: posts.map((p) => {
+        return {
+          ...p._doc,
+          _id: p._id.toString(),
+          createdAt: p.createdAt.toISOString(),
+          updatedAt: p.updatedAt.toISOString(),
+        };
+      }),
+    };
   },
   fetchComments: async function (args, req) {
     const { postId } = args;
     const userId = req.userId;
     const fetchedChat = await Chat.find({ isPostChat: true, post: postId });
+
     if (fetchedChat.length == 0) {
       const newCommentChat = new Chat({
         chatName: "comment",
@@ -74,8 +93,20 @@ module.exports = {
       await newCommentChat.save();
       return { comments: [] };
     }
-    const messages = await Message.find({ chat: fetchedChat._id });
-    return { comments: messages };
+    const messages = await Message.find({ chat: fetchedChat[0]._id }).populate(
+      "sender",
+      "-password"
+    );
+    return {
+      comments: messages.map((m) => {
+        return {
+          ...m._doc,
+          _id: m._id.toString(),
+          createdAt: m.createdAt.toISOString(),
+          updatedAt: m.updatedAt.toISOString(),
+        };
+      }),
+    };
   },
   sendComment: async function (args, req) {
     const { chatId, content } = args;
@@ -86,26 +117,31 @@ module.exports = {
       chat: chatId,
     });
     const createdComment = await newComment.save();
+
     return {
       ...createdComment._doc,
       _id: createdComment._id.toString(),
     };
   },
   createPost: async function (args, req) {
-    const { image, text } = args.postInputData;
+    const { image, text } = args.postInput;
     const userId = req.userId;
     const newPost = new Post({
       image: image,
       text: text,
       creator: userId,
     });
-    const createdPost = await newPost.save();
+    let createdPost = await newPost.save();
+    createdPost = await Post.populate(createdPost, {
+      path: "creator",
+      select: "name email pic",
+    });
     return { ...createdPost._doc, _id: createdPost._id.toString() };
   },
   deletePost: async function (args, req) {
     const { postId } = args;
     const chat = await Chat.findOne({ post: postId });
-    if (postChat) {
+    if (chat) {
       await Message.deleteMany({ chat: chat._id });
       await Chat.deleteOne({ _id: chat._id });
     }
@@ -120,11 +156,11 @@ module.exports = {
       content: content,
       chat: chatId,
     });
-    const createdMessage = await newMessage.save();
-    await Chat.findByIdAndUpdate(chatId, { latestMessage: savedMessage });
+    let createdMessage = await newMessage.save();
+    await Chat.findByIdAndUpdate(chatId, { latestMessage: createdMessage });
 
     createdMessage = await Message.findById(createdMessage._id)
-      .populate("sender", "name pic")
+      .populate("sender", "name pic email")
       .populate("chat");
 
     createdMessage = await User.populate(createdMessage, {
@@ -138,50 +174,62 @@ module.exports = {
     const messages = await Message.find({ chat: chatId })
       .populate("sender", "name pic email")
       .populate("chat");
-
-    return { ...messages._doc, _id: messages._id.toString() };
+    return {
+      messages: messages.map((m) => {
+        return {
+          ...m._doc,
+          _id: m._id.toString(),
+          createdAt: m.createdAt.toISOString(),
+          updatedAt: m.updatedAt.toISOString(),
+        };
+      }),
+    };
   },
   accessChat: async function (args, req) {
     const { userId } = args;
     const userId2 = req.userId;
-    const chat = await Chat.find({
+    let chat = await Chat.findOne({
       isGroupChat: false,
       $and: [
         { users: { $elemMatch: { $eq: userId } } },
         { users: { $elemMatch: { $eq: userId2 } } },
       ],
-    });
-    if (chat.length == 0) {
+    }).populate("latestMessage");
+
+    if (!chat) {
       const newChat = new Chat({
         chatName: "personal",
         isGroupChat: false,
         isPostChat: false,
         users: [userId, userId2],
       });
-      const createdChat = await newChat.save();
-      createdChat = User.populate(createdChat, {
+      let createdChat = await newChat.save();
+      createdChat = await User.populate(createdChat, {
         path: "latestMessage.sender",
         select: "name pic email",
       });
-      createdChat = User.populate(createdChat, {
+      createdChat = await User.populate(createdChat, {
         path: "users",
         select: "name pic email",
       });
+      console.log(createdChat);
       return { ...createdChat._doc, _id: createdChat._id.toString() };
     }
-    chat = User.populate(chat, {
+    chat = await User.populate(chat, {
       path: "latestMessage.sender",
       select: "name pic email",
     });
-    chat = User.populate(chat, {
+    chat = await User.populate(chat, {
       path: "users",
       select: "name pic email",
     });
+    console.log(chat);
     return { ...chat._doc, _id: chat._id.toString() };
   },
   fetchChats: async function (args, req) {
     const userId = req.userId;
-    const chats = await Chat.find({
+    console.log(userId);
+    let chats = await Chat.find({
       users: { $elemMatch: { $eq: userId } },
       isPostChat: false,
     })
@@ -190,15 +238,25 @@ module.exports = {
       .populate("latestMessage")
       .sort({ updatedAt: -1 });
 
-    chats = User.populate(chats, {
+    chats = await User.populate(chats, {
       path: "lastMessage.sender",
       select: "name pic email",
     });
-
-    return { chats: chats };
+    // console.log(chats);
+    return {
+      chats: chats.map((c) => {
+        console.log(c);
+        return {
+          ...c._doc,
+          _id: c._id.toString(),
+          createdAt: c.createdAt.toISOString(),
+          updatedAt: c.updatedAt.toISOString(),
+        };
+      }),
+    };
   },
   createGroupChat: async function (args, req) {
-    const { chatName, users } = args;
+    const { groupName, users } = args;
     const admin = req.userId;
     users.push(admin);
     const newGroupChat = new Chat({
@@ -208,10 +266,11 @@ module.exports = {
       users: users,
       groupAdmin: admin,
     });
-    const createdGroupChat = await newGroupChat.save();
-    createdGroupChat = Chat.findOne({ _id: createdGroupChat._id })
+    let createdGroupChat = await newGroupChat.save();
+    createdGroupChat = await Chat.findOne({ _id: createdGroupChat._id })
       .populate("users", "-password")
       .populate("groupAdmin", "-password");
+    // console.log(createdGroupChat);
 
     return { ...createdGroupChat._doc, _id: createdGroupChat._id.toString() };
   },
@@ -219,7 +278,7 @@ module.exports = {
     const { chatId, newChatName } = args;
     const group = await Chat.findByIdAndUpdate(
       chatId,
-      { chatName: chatName },
+      { chatName: newChatName },
       { new: true }
     )
       .populate("users", "-password")
