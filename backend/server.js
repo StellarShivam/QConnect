@@ -17,16 +17,15 @@ dotenv.config();
 connectDB();
 
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*"); //* represents that all the domains are allowed to access our server
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, PUT,PATCH"); //by setting this we allow these origins to use specific methods
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, PUT,PATCH");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-  ); //headers that client can set on their requests
+  );
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
-  } //browser first sends an OPTIONS request before post,patch,delete,put..etc. requests
-  //graphql declines anything  which is not a post or get request so the options request is declined
+  }
   next();
 });
 
@@ -39,13 +38,17 @@ app.use(
     schema: graphqlSchema,
     rootValue: graphResolver,
     graphiql: true,
+    customFormatErrorFn(err) {
+      if (!err.originalError) {
+        return err;
+      }
+      const data = err.originalError.data;
+      const message = err.message || "An error occurred";
+      const code = err.originalError.code || 500;
+      return { message: message, status: code, data: data };
+    },
   })
 );
-
-// app.use("/api/auth", authRoutes);
-// app.use("/api/posts", postRoutes);
-// app.use("/api/chat", chatRoutes);
-// app.use("/api/message", messageRoutes);
 
 const PORT = process.env.PORT;
 

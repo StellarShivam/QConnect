@@ -6,11 +6,26 @@ const generateToken = require("../config/generateToken");
 
 const bcrypt = require("bcryptjs");
 const validator = require("validator"); //used to apply validation in graphql
-const jwt = require("jsonwebtoken");
 
 module.exports = {
   signup: async function (args, req) {
     const { name, email, password, pic } = args.userInput;
+    const errors = [];
+    if (!validator.isEmail(email)) {
+      errors.push({ message: "E-mail is invalid" });
+    }
+    if (
+      validator.isEmpty(password) ||
+      !validator.isLength(password, { min: 5 })
+    ) {
+      errors.push({ message: "Password too short" });
+    }
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const existingUser = await User.findOne({ email: email });
     if (existingUser) {
       const error = new Error("User already exists");
@@ -44,11 +59,21 @@ module.exports = {
     return { token: token, userId: user._id.toString() };
   },
   fetchAllPosts: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const userId = req.userId;
     const posts = await Post.find({ creator: { $ne: userId } }).populate(
       "creator",
       "name email pic"
     );
+    if (posts.length == 0) {
+      const error = new Error("No post found!");
+      error.code = 404;
+      throw error;
+    }
     return {
       posts: posts.map((p) => {
         return {
@@ -61,11 +86,21 @@ module.exports = {
     };
   },
   fetchMyPosts: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const userId = req.userId;
     const posts = await Post.find({ creator: userId }).populate(
       "creator",
       "name email pic"
     );
+    if (posts.length == 0) {
+      const error = new Error("No post found!");
+      error.code = 404;
+      throw error;
+    }
     return {
       posts: posts.map((p) => {
         return {
@@ -78,6 +113,11 @@ module.exports = {
     };
   },
   fetchComments: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { postId } = args;
     const userId = req.userId;
     const fetchedChat = await Chat.find({ isPostChat: true, post: postId });
@@ -109,6 +149,11 @@ module.exports = {
     };
   },
   sendComment: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { chatId, content } = args;
     const userId = req.userId;
     const newComment = new Message({
@@ -124,7 +169,26 @@ module.exports = {
     };
   },
   createPost: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { image, text } = args.postInput;
+    const errors = [];
+    if (validator.isEmpty(text)) {
+      errors.push({ message: "Text cannot be empty" });
+    }
+    if (validator.isEmpty(image)) {
+      errors.push({ message: "Please upload image" });
+    }
+
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const userId = req.userId;
     const newPost = new Post({
       image: image,
@@ -139,7 +203,18 @@ module.exports = {
     return { ...createdPost._doc, _id: createdPost._id.toString() };
   },
   deletePost: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { postId } = args;
+    const post = await Post.findById(postId).populate("creator");
+    if (post.creator._id.toString() !== req.userId.toString()) {
+      const error = new Error("Not authorized!");
+      error.code = 403;
+      throw error;
+    }
     const chat = await Chat.findOne({ post: postId });
     if (chat) {
       await Message.deleteMany({ chat: chat._id });
@@ -149,7 +224,22 @@ module.exports = {
     return { ...deletedPost._doc, _id: deletedPost._id.toString() };
   },
   sendMessage: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { chatId, content } = args;
+    const errors = [];
+    if (validator.isEmpty(text)) {
+      errors.push({ message: "Text cannot be empty" });
+    }
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const userId = req.userId;
     const newMessage = new Message({
       sender: userId,
@@ -170,6 +260,11 @@ module.exports = {
     return { ...createdMessage._doc, _id: createdMessage._id.toString() };
   },
   allMessages: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { chatId } = args;
     const messages = await Message.find({ chat: chatId })
       .populate("sender", "name pic email")
@@ -186,6 +281,11 @@ module.exports = {
     };
   },
   accessChat: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { userId } = args;
     const userId2 = req.userId;
     let chat = await Chat.findOne({
@@ -227,8 +327,12 @@ module.exports = {
     return { ...chat._doc, _id: chat._id.toString() };
   },
   fetchChats: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const userId = req.userId;
-    console.log(userId);
     let chats = await Chat.find({
       users: { $elemMatch: { $eq: userId } },
       isPostChat: false,
@@ -242,7 +346,6 @@ module.exports = {
       path: "lastMessage.sender",
       select: "name pic email",
     });
-    // console.log(chats);
     return {
       chats: chats.map((c) => {
         console.log(c);
@@ -256,7 +359,25 @@ module.exports = {
     };
   },
   createGroupChat: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { groupName, users } = args;
+    const errors = [];
+    if (validator.isEmpty(text)) {
+      errors.push({ message: "Text cannot be empty" });
+    }
+    if (users.length < 2) {
+      errors.push({ message: "Please add 2 or more members to create group" });
+    }
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const admin = req.userId;
     users.push(admin);
     const newGroupChat = new Chat({
@@ -270,12 +391,26 @@ module.exports = {
     createdGroupChat = await Chat.findOne({ _id: createdGroupChat._id })
       .populate("users", "-password")
       .populate("groupAdmin", "-password");
-    // console.log(createdGroupChat);
 
     return { ...createdGroupChat._doc, _id: createdGroupChat._id.toString() };
   },
   renameGroup: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { chatId, newChatName } = args;
+    const errors = [];
+    if (validator.isEmpty(newChatName)) {
+      errors.push({ message: "Text cannot be empty" });
+    }
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const group = await Chat.findByIdAndUpdate(
       chatId,
       { chatName: newChatName },
@@ -288,7 +423,22 @@ module.exports = {
     return { ...group._doc, _id: group._id.toString() };
   },
   addToGroup: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { chatId, userId } = args;
+    const errors = [];
+    if (validator.isEmpty(userId)) {
+      errors.push({ message: "Please select users to add" });
+    }
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const updatedChat = await Chat.findByIdAndUpdate(
       chatId,
       { $push: { users: userId } },
@@ -302,7 +452,22 @@ module.exports = {
     return { ...updatedChat._doc, _id: updatedChat._id.toString() };
   },
   removeFromGroup: async function (args, req) {
+    if (!req.isAuth) {
+      const error = new Error("Not Authenticated");
+      error.code = 401;
+      throw error;
+    }
     const { chatId, userId } = args;
+    const errors = [];
+    if (validator.isEmpty(userId)) {
+      errors.push({ message: "Please select user to remove" });
+    }
+    if (errors.length > 0) {
+      const error = new Error("Inavlid Input");
+      error.data = errors;
+      errors.code = 422;
+      throw error;
+    }
     const updatedChat = await Chat.findByIdAndUpdate(
       chatId,
       { $pull: { users: userId } },
